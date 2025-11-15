@@ -7,7 +7,8 @@ const { authenticateToken } = require('./middleware/auth');
 
 // --- CORRECT CORS CONFIGURATION ---
 const corsOptions = {
-  origin: 'http://localhost:5173', // Your Vue app's address
+  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Your Vue app's address
+  credentials: true,
   methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
   allowedHeaders: ['Content-Type', 'Authorization']
 };
