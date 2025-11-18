@@ -6,13 +6,37 @@ const app = express();
 const { authenticateToken } = require('./middleware/auth'); 
 
 // --- CORRECT CORS CONFIGURATION ---
+const allowedOrigins = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+  : ['http://localhost:5173'];
+
+console.log('📋 Allowed CORS origins:', allowedOrigins);
+
 const corsOptions = {
-  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Your Vue app's address
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or curl)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ CORS allowed for origin:', origin);
+      callback(null, true);
+    } else {
+      console.log('❌ CORS blocked origin:', origin);
+      console.log('📋 Allowed origins:', allowedOrigins);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // 24 hours
 };
+
 app.use(cors(corsOptions));
+
+// Explicit OPTIONS handling for all routes
+app.options('*', cors(corsOptions));
 
 // --- Middleware ---
 // Increase body size limit to handle large Word document imports
