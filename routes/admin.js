@@ -443,4 +443,162 @@ router.post('/test-email', async (req, res) => {
   }
 });
 
+// @route   GET /api/admin/tiers
+// @desc    Get all membership tiers
+// @access  Admin
+router.get('/tiers', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, name, slug, limits, features, price_monthly, price_annual,
+              is_active, display_order, created_at, updated_at
+       FROM membership_tiers
+       ORDER BY display_order ASC, id ASC`
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get tiers error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   PUT /api/admin/tiers/:tierId
+// @desc    Update a membership tier
+// @access  Admin
+router.put('/tiers/:tierId', async (req, res) => {
+  try {
+    const { tierId } = req.params;
+    const {
+      name,
+      slug,
+      limits,
+      features,
+      price_monthly,
+      price_annual,
+      is_active,
+      display_order
+    } = req.body;
+
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+
+    if (slug !== undefined) {
+      updates.push(`slug = $${paramIndex++}`);
+      values.push(slug);
+    }
+
+    if (limits !== undefined) {
+      updates.push(`limits = $${paramIndex++}`);
+      values.push(JSON.stringify(limits));
+    }
+
+    if (features !== undefined) {
+      updates.push(`features = $${paramIndex++}`);
+      values.push(JSON.stringify(features));
+    }
+
+    if (price_monthly !== undefined) {
+      updates.push(`price_monthly = $${paramIndex++}`);
+      values.push(price_monthly);
+    }
+
+    if (price_annual !== undefined) {
+      updates.push(`price_annual = $${paramIndex++}`);
+      values.push(price_annual);
+    }
+
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${paramIndex++}`);
+      values.push(is_active);
+    }
+
+    if (display_order !== undefined) {
+      updates.push(`display_order = $${paramIndex++}`);
+      values.push(display_order);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    // Add updated_at
+    updates.push(`updated_at = NOW()`);
+    values.push(tierId);
+
+    const query = `
+      UPDATE membership_tiers
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, name, slug, limits, features, price_monthly, price_annual,
+                is_active, display_order, created_at, updated_at
+    `;
+
+    const result = await db.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Tier not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update tier error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   GET /api/admin/settings
+// @desc    Get all system settings
+// @access  Admin
+router.get('/settings', async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, setting_key, setting_value, description, updated_at
+       FROM system_settings
+       ORDER BY setting_key ASC`
+    );
+
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Get system settings error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   PUT /api/admin/settings/:settingId
+// @desc    Update a system setting
+// @access  Admin
+router.put('/settings/:settingId', async (req, res) => {
+  try {
+    const { settingId } = req.params;
+    const { setting_value } = req.body;
+
+    if (setting_value === undefined) {
+      return res.status(400).json({ error: 'setting_value is required' });
+    }
+
+    const result = await db.query(
+      `UPDATE system_settings
+       SET setting_value = $1, updated_at = NOW(), updated_by = $2
+       WHERE id = $3
+       RETURNING id, setting_key, setting_value, description, updated_at`,
+      [setting_value, req.user.user_id, settingId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Setting not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Update system setting error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 module.exports = router;
