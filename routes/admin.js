@@ -21,6 +21,8 @@ router.get('/users', async (req, res) => {
     const offset = (page - 1) * limit;
     const search = req.query.search || '';
 
+    console.log('[Admin Users] Request params:', { page, limit, offset, search });
+
     let query = `
       SELECT
         user_id, username, email, first_name, last_name,
@@ -42,6 +44,9 @@ router.get('/users', async (req, res) => {
     query += ` ORDER BY created_at DESC LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
     queryParams.push(limit, offset);
 
+    console.log('[Admin Users] Executing query:', query);
+    console.log('[Admin Users] Query params:', queryParams);
+
     const [usersResult, countResult] = await Promise.all([
       db.query(query, queryParams),
       db.query(countQuery, countParams)
@@ -49,6 +54,12 @@ router.get('/users', async (req, res) => {
 
     const totalUsers = parseInt(countResult.rows[0].count);
     const totalPages = Math.ceil(totalUsers / limit);
+
+    console.log('[Admin Users] Query results:', {
+      usersFound: usersResult.rows.length,
+      totalUsers,
+      totalPages
+    });
 
     res.json({
       users: usersResult.rows,
@@ -61,7 +72,8 @@ router.get('/users', async (req, res) => {
     });
   } catch (error) {
     console.error('Admin get users error:', error);
-    res.status(500).json({ error: 'Server error' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Server error', details: error.message });
   }
 });
 
