@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS email_settings (
   smtp_user VARCHAR(255),
   smtp_pass TEXT,  -- Encrypted password
   from_email VARCHAR(255),
-  from_name VARCHAR(255) DEFAULT 'Lyra',
+  from_name VARCHAR(255) DEFAULT 'CodexScribe',
   use_tls BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -30,7 +30,7 @@ CREATE TRIGGER email_settings_updated_at
 
 -- Insert default row (only one row should exist)
 INSERT INTO email_settings (smtp_host, smtp_port, smtp_user, from_name)
-VALUES ('smtp.gmail.com', 587, '', 'Lyra')
+VALUES ('smtp.gmail.com', 587, '', 'CodexScribe')
 ON CONFLICT DO NOTHING;
 
 SELECT 'Migration 021 completed' AS status;

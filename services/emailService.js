@@ -118,7 +118,7 @@ To access the manuscript, click the link above or paste it into your browser. Yo
 Thank you for being a beta reader!
 
 ---
-Sent via Lyra
+Sent via CodexScribe
     `.trim();
 
     // HTML version
@@ -192,7 +192,7 @@ Sent via Lyra
         Thank you for being a beta reader!
       </p>
       <p style="color: #9ca3af; font-size: 11px; margin: 15px 0 0 0;">
-        Sent via <strong>Lyra</strong> - Creative Writing Platform
+        Sent via <strong>CodexScribe</strong> - Creative Writing Platform
       </p>
     </div>
   </div>
