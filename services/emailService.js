@@ -216,7 +216,134 @@ Sent via CodexScribe
   }
 }
 
+/**
+ * Send password reset email
+ * @param {Object} params - Email parameters
+ * @param {string} params.email - User's email address
+ * @param {string} params.username - User's username
+ * @param {string} params.resetToken - Password reset token
+ * @returns {Promise<void>}
+ */
+async function sendPasswordResetEmail({ email, username, resetToken }) {
+  try {
+    const { transporter, fromEmail, fromName } = await getTransporter();
+
+    // Build the reset URL
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const resetUrl = `${clientUrl}/reset-password?token=${resetToken}`;
+
+    // Email subject
+    const subject = 'Reset Your CodexScribe Password';
+
+    // Plain text version
+    const textContent = `
+Hi ${username || 'there'},
+
+We received a request to reset your password for your CodexScribe account.
+
+Click the link below to reset your password:
+${resetUrl}
+
+This link will expire in 1 hour.
+
+If you didn't request a password reset, you can safely ignore this email. Your password will not be changed.
+
+For security, please do not share this link with anyone.
+
+---
+CodexScribe - Writing Tools for Storytellers
+    `.trim();
+
+    // HTML version
+    const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${subject}</title>
+</head>
+<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f4f4f4;">
+  <div style="background-color: #ffffff; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+    <!-- Header -->
+    <div style="text-align: center; margin-bottom: 30px;">
+      <h1 style="color: #1c2c3b; margin: 0; font-size: 24px;">Reset Your Password</h1>
+      <p style="color: #6b7280; margin: 5px 0 0 0; font-size: 14px;">CodexScribe Account Security</p>
+    </div>
+
+    <!-- Greeting -->
+    <p style="font-size: 16px; margin-bottom: 20px;">Hi <strong>${username || 'there'}</strong>,</p>
+
+    <!-- Main Message -->
+    <p style="font-size: 16px; margin-bottom: 20px;">
+      We received a request to reset the password for your CodexScribe account. Click the button below to create a new password.
+    </p>
+
+    <!-- CTA Button -->
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="${resetUrl}"
+         style="display: inline-block; background-color: #003666; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-weight: bold; font-size: 16px; box-shadow: 0 2px 4px rgba(0, 54, 102, 0.4);">
+        Reset Password
+      </a>
+    </div>
+
+    <!-- Expiration Notice -->
+    <div style="background-color: #fef3c7; border: 1px solid #fbbf24; border-radius: 4px; padding: 12px; margin: 20px 0;">
+      <p style="margin: 0; font-size: 14px; color: #92400e;">
+        ⏰ <strong>Note:</strong> This link will expire in <strong>1 hour</strong>
+      </p>
+    </div>
+
+    <!-- Alternative Link -->
+    <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+      <p style="font-size: 14px; color: #4b5563;">
+        If the button doesn't work, copy and paste this link into your browser:
+      </p>
+      <p style="font-size: 12px; color: #6b7280; word-break: break-all; background-color: #f3f4f6; padding: 10px; border-radius: 4px;">
+        ${resetUrl}
+      </p>
+    </div>
+
+    <!-- Security Notice -->
+    <div style="margin-top: 25px; padding: 15px; background-color: #f9fafb; border-radius: 4px;">
+      <p style="font-size: 14px; color: #4b5563; margin: 0;">
+        <strong>Didn't request this?</strong><br>
+        If you didn't request a password reset, you can safely ignore this email. Your password will remain unchanged.
+      </p>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center;">
+      <p style="color: #9ca3af; font-size: 11px; margin: 0;">
+        <strong>CodexScribe</strong> - Writing Tools for Storytellers
+      </p>
+      <p style="color: #9ca3af; font-size: 11px; margin: 10px 0 0 0;">
+        For security, please do not share this link with anyone.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+    `.trim();
+
+    // Send the email
+    await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: email,
+      subject,
+      text: textContent,
+      html: htmlContent
+    });
+
+    console.log(`✅ Password reset email sent to ${email}`);
+  } catch (error) {
+    console.error('Error sending password reset email:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   getTransporter,
-  sendReaderInvitation
+  sendReaderInvitation,
+  sendPasswordResetEmail
 };

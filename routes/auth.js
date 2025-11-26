@@ -2,9 +2,11 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const db = require('../db');
 const authController = require('../controllers/authController');
 const tokenService = require('../services/tokenService');
+const emailService = require('../services/emailService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { authenticateToken } = require('../middleware/auth'); 
 
@@ -36,11 +38,11 @@ router.post('/register-trial', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
     
-    // Create user with trial status
+    // Create user with trial status and tier
     const newUser = await db.query(
-      `INSERT INTO users (username, email, password_hash, subscription_status, trial_started_at, marketing_opt_in, created_at) 
-       VALUES ($1, $2, $3, $4, NOW(), $5, NOW()) RETURNING *`,
-      [username, email, passwordHash, 'trial', marketingOptIn || false]
+      `INSERT INTO users (username, email, password_hash, subscription_status, subscription_tier, trial_started_at, marketing_opt_in, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), $6, NOW()) RETURNING *`,
+      [username, email, passwordHash, 'trial', 'trial', marketingOptIn || false]
     );
     
     const user = newUser.rows[0];
@@ -69,10 +71,10 @@ router.post('/register-trial', async (req, res) => {
 // @route   POST api/auth/register-with-subscription
 // @desc    Register user and create paid subscription
 router.post('/register-with-subscription', async (req, res) => {
-  const { 
-    username, email, password, firstName, lastName, 
+  const {
+    username, email, password, firstName, lastName,
     address, city, state, zipCode, marketingOptIn,
-    paymentMethodId, planType 
+    paymentMethodId, stripePriceId, tierSlug
   } = req.body;
   
   try {
@@ -88,20 +90,19 @@ router.post('/register-with-subscription', async (req, res) => {
       return res.status(400).json({ error: 'Username already taken' });
     }
 
-    // Get the correct Stripe price ID based on plan type
-    const priceIds = {
-      monthly: process.env.STRIPE_MONTHLY_PRICE_ID || 'price_1S98u7FAF9VAMihO8KBiVTIH',
-      annual: process.env.STRIPE_ANNUAL_PRICE_ID || 'price_annual_id_here'
-    };
-
-    if (!priceIds[planType]) {
-      return res.status(400).json({ error: 'Invalid plan type' });
+    // Validate required fields
+    if (!stripePriceId) {
+      return res.status(400).json({ error: 'Stripe Price ID is required' });
     }
-    
+
+    if (!tierSlug) {
+      return res.status(400).json({ error: 'Tier slug is required' });
+    }
+
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
-    
+
     // Create Stripe customer
     const customer = await stripe.customers.create({
       payment_method: paymentMethodId,
@@ -119,10 +120,10 @@ router.post('/register-with-subscription', async (req, res) => {
       },
     });
 
-    // Create subscription
+    // Create subscription with the exact Stripe Price ID from frontend
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
-      items: [{ price: priceIds[planType] }],
+      items: [{ price: stripePriceId }],
       expand: ['latest_invoice.payment_intent'],
     });
 
@@ -130,17 +131,17 @@ router.post('/register-with-subscription', async (req, res) => {
       return res.status(400).json({ error: 'Payment failed' });
     }
     
-    // Create user in database
+    // Create user in database with tier information
     const newUser = await db.query(
       `INSERT INTO users (
         username, email, password_hash, first_name, last_name,
-        address, city, state, zip_code, subscription_status,
-        stripe_customer_id, stripe_subscription_id, marketing_opt_in, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()) RETURNING *`,
+        address, city, state, zip_code, subscription_status, subscription_tier,
+        stripe_customer_id, stripe_subscription_id, stripe_price_id, marketing_opt_in, created_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()) RETURNING *`,
       [
         username, email, passwordHash, firstName, lastName,
-        address, city, state, zipCode, 'active',
-        customer.id, subscription.id, marketingOptIn || false
+        address, city, state, zipCode, 'active', tierSlug.toLowerCase(),
+        customer.id, subscription.id, stripePriceId, marketingOptIn || false
       ]
     );
     
@@ -279,6 +280,211 @@ router.delete('/me', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Account deletion error:', err.message);
     res.status(500).json({ error: 'Server error during account deletion.' });
+  }
+});
+
+// @route   POST api/auth/forgot-password
+// @desc    Request password reset - sends email with reset link
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  // Always return success to prevent email enumeration attacks
+  const successResponse = {
+    message: 'If an account with that email exists, a password reset link has been sent.'
+  };
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    // Check if user exists
+    const userResult = await db.query(
+      'SELECT user_id, email, username FROM users WHERE LOWER(email) = LOWER($1)',
+      [email]
+    );
+
+    if (userResult.rows.length === 0) {
+      // User doesn't exist, but return success to prevent email enumeration
+      console.log(`Password reset requested for non-existent email: ${email}`);
+      return res.status(200).json(successResponse);
+    }
+
+    const user = userResult.rows[0];
+
+    // Rate limiting: Check for recent reset requests (max 3 per hour)
+    const recentTokensResult = await db.query(
+      `SELECT COUNT(*) FROM password_reset_tokens
+       WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+      [user.user_id]
+    );
+
+    if (parseInt(recentTokensResult.rows[0].count) >= 3) {
+      console.log(`Rate limit exceeded for password reset: ${email}`);
+      return res.status(429).json({
+        error: 'Too many password reset requests. Please try again later.'
+      });
+    }
+
+    // Generate secure random token (64 hex characters = 32 bytes)
+    const resetToken = crypto.randomBytes(32).toString('hex');
+
+    // Token expires in 1 hour
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    // Invalidate any existing unused tokens for this user
+    await db.query(
+      `UPDATE password_reset_tokens
+       SET used_at = NOW()
+       WHERE user_id = $1 AND used_at IS NULL`,
+      [user.user_id]
+    );
+
+    // Store the new token
+    await db.query(
+      `INSERT INTO password_reset_tokens (user_id, token, expires_at, created_at)
+       VALUES ($1, $2, $3, NOW())`,
+      [user.user_id, resetToken, expiresAt]
+    );
+
+    // Send password reset email
+    await emailService.sendPasswordResetEmail({
+      email: user.email,
+      username: user.username,
+      resetToken: resetToken
+    });
+
+    console.log(`Password reset email sent to: ${email}`);
+    res.status(200).json(successResponse);
+
+  } catch (err) {
+    console.error('Forgot password error:', err.message);
+    // Still return success to prevent information leakage
+    res.status(200).json(successResponse);
+  }
+});
+
+// @route   POST api/auth/validate-reset-token
+// @desc    Validate a password reset token
+router.post('/validate-reset-token', async (req, res) => {
+  const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Reset token is required' });
+  }
+
+  try {
+    // Find valid, unused token that hasn't expired
+    const tokenResult = await db.query(
+      `SELECT prt.*, u.email, u.username
+       FROM password_reset_tokens prt
+       JOIN users u ON prt.user_id = u.user_id
+       WHERE prt.token = $1
+         AND prt.used_at IS NULL
+         AND prt.expires_at > NOW()`,
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid or expired reset link. Please request a new password reset.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    const tokenData = tokenResult.rows[0];
+
+    res.status(200).json({
+      valid: true,
+      email: tokenData.email
+    });
+
+  } catch (err) {
+    console.error('Validate reset token error:', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// @route   POST api/auth/reset-password
+// @desc    Reset password using valid token
+router.post('/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Reset token is required' });
+  }
+
+  if (!password || password.length < 8) {
+    return res.status(400).json({
+      error: 'Password must be at least 8 characters long'
+    });
+  }
+
+  // Validate password requirements
+  if (!/[A-Z]/.test(password)) {
+    return res.status(400).json({
+      error: 'Password must contain at least one uppercase letter'
+    });
+  }
+
+  if (!/[0-9]/.test(password)) {
+    return res.status(400).json({
+      error: 'Password must contain at least one number'
+    });
+  }
+
+  try {
+    // Find valid, unused token that hasn't expired
+    const tokenResult = await db.query(
+      `SELECT prt.*, u.user_id, u.email
+       FROM password_reset_tokens prt
+       JOIN users u ON prt.user_id = u.user_id
+       WHERE prt.token = $1
+         AND prt.used_at IS NULL
+         AND prt.expires_at > NOW()`,
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid or expired reset link. Please request a new password reset.',
+        code: 'INVALID_TOKEN'
+      });
+    }
+
+    const tokenData = tokenResult.rows[0];
+
+    // Hash the new password
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    // Update the user's password
+    await db.query(
+      'UPDATE users SET password_hash = $1 WHERE user_id = $2',
+      [passwordHash, tokenData.user_id]
+    );
+
+    // Mark token as used
+    await db.query(
+      'UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1',
+      [tokenData.id]
+    );
+
+    // Invalidate all refresh tokens for this user (force re-login everywhere)
+    await db.query(
+      'DELETE FROM refresh_tokens WHERE user_id = $1',
+      [tokenData.user_id]
+    );
+
+    console.log(`Password reset successful for user: ${tokenData.email}`);
+
+    res.status(200).json({
+      message: 'Password has been reset successfully. You can now log in with your new password.'
+    });
+
+  } catch (err) {
+    console.error('Reset password error:', err.message);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
